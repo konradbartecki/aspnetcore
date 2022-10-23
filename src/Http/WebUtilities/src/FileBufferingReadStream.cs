@@ -6,6 +6,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Internal;
@@ -258,6 +259,14 @@ namespace Microsoft.AspNetCore.WebUtilities
             }
 
             _tempFileName = Path.Combine(_tempFileDirectory, "ASPNETCORE_" + Guid.NewGuid().ToString() + ".tmp");
+
+            // Create a temp file with the correct Unix file mode before moving it to the assigned _tempFileName in the _tempFileDirectory.
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                var tempTempFileName = Path.GetTempFileName();
+                File.Move(tempTempFileName, _tempFileName);
+            }
+
             return new FileStream(_tempFileName, FileMode.Create, FileAccess.ReadWrite, FileShare.Delete, 1024 * 16,
                 FileOptions.Asynchronous | FileOptions.DeleteOnClose | FileOptions.SequentialScan);
         }
@@ -317,7 +326,8 @@ namespace Microsoft.AspNetCore.WebUtilities
             {
                 _buffer.Write(buffer.Slice(0, read));
             }
-            else
+            // Allow zero-byte reads
+            else if (buffer.Length > 0)
             {
                 _completelyBuffered = true;
             }
@@ -392,7 +402,8 @@ namespace Microsoft.AspNetCore.WebUtilities
             {
                 await _buffer.WriteAsync(buffer.Slice(0, read), cancellationToken);
             }
-            else
+            // Allow zero-byte reads
+            else if (buffer.Length > 0)
             {
                 _completelyBuffered = true;
             }

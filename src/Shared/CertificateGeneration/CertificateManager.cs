@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -493,11 +494,11 @@ namespace Microsoft.AspNetCore.Certificates.Generation
                                 // Export the key first to an encrypted PEM to avoid issues with System.Security.Cryptography.Cng indicating that the operation is not supported.
                                 // This is likely by design to avoid exporting the key by mistake.
                                 // To bypass it, we export the certificate to pem temporarily and then we import it and export it as unprotected PEM.
-                                keyBytes = key.ExportEncryptedPkcs8PrivateKey("", new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 1));
+                                keyBytes = key.ExportEncryptedPkcs8PrivateKey((ReadOnlySpan<char>)"", new PbeParameters(PbeEncryptionAlgorithm.Aes256Cbc, HashAlgorithmName.SHA256, 1));
                                 pem = PemEncoding.Write("ENCRYPTED PRIVATE KEY", keyBytes);
                                 key.Dispose();
                                 key = RSA.Create();
-                                key.ImportFromEncryptedPem(pem, "");
+                                key.ImportFromEncryptedPem(pem, (ReadOnlySpan<char>)"");
                                 Array.Clear(keyBytes, 0, keyBytes.Length);
                                 Array.Clear(pem, 0, pem.Length);
                                 keyBytes = key.ExportPkcs8PrivateKey();
@@ -539,6 +540,14 @@ namespace Microsoft.AspNetCore.Certificates.Generation
             try
             {
                 Log.WriteCertificateToDisk(path);
+
+                // Create a temp file with the correct Unix file mode before moving it to the expected path.
+                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    var tempFilename = Path.GetTempFileName();
+                    File.Move(tempFilename, path, overwrite: true);
+                }
+
                 File.WriteAllBytes(path, bytes);
             }
             catch (Exception ex) when (Log.IsEnabled())
@@ -559,6 +568,14 @@ namespace Microsoft.AspNetCore.Certificates.Generation
                 {
                     var keyPath = Path.ChangeExtension(path, ".key");
                     Log.WritePemKeyToDisk(keyPath);
+
+                    // Create a temp file with the correct Unix file mode before moving it to the expected path.
+                    if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    {
+                        var tempFilename = Path.GetTempFileName();
+                        File.Move(tempFilename, keyPath, overwrite: true);
+                    }
+
                     File.WriteAllBytes(keyPath, pemEnvelope);
                 }
                 catch (Exception ex) when (Log.IsEnabled())

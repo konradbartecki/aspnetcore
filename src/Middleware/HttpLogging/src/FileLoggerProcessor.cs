@@ -30,7 +30,7 @@ namespace Microsoft.AspNetCore.HttpLogging
         private bool _maxFilesReached;
         private TimeSpan _flushInterval;
         private W3CLoggingFields _fields;
-        private DateTime _today = DateTime.Now;
+        private DateTime _today;
         private bool _firstFile = true;
 
         private readonly IOptionsMonitor<W3CLoggerOptions> _options;
@@ -39,6 +39,9 @@ namespace Microsoft.AspNetCore.HttpLogging
         private readonly List<string> _currentBatch = new List<string>();
         private readonly Task _outputTask;
         private readonly CancellationTokenSource _cancellationTokenSource;
+
+        // Internal to allow for testing
+        internal ISystemDateTime SystemDateTime {get; set;} = new SystemDateTime();
 
         private readonly object _pathLock = new object();
 
@@ -98,6 +101,8 @@ namespace Microsoft.AspNetCore.HttpLogging
                 }
             });
 
+            _today = SystemDateTime.Now;
+
             // Start message queue processor
             _cancellationTokenSource = new CancellationTokenSource();
             _outputTask = Task.Run(ProcessLogQueue);
@@ -155,24 +160,29 @@ namespace Microsoft.AspNetCore.HttpLogging
         private async Task WriteMessagesAsync(List<string> messages, CancellationToken cancellationToken)
         {
             // Files are written up to _maxFileSize before rolling to a new file
-            DateTime today = DateTime.Now;
+            DateTime today = SystemDateTime.Now;
+
+            if (!TryCreateDirectory())
+            {
+                // return early if we fail to create the directory
+                return;
+            }
+
             var fullName = GetFullName(today);
             // Don't write to an incomplete file left around by a previous FileLoggerProcessor
             if (_firstFile)
             {
-                while (File.Exists(fullName))
+                _fileNumber = GetFirstFileCount(today);
+                fullName = GetFullName(today);
+                if (_fileNumber >= W3CLoggerOptions.MaxFileCount)
                 {
-                    _fileNumber++;
-                    if (_fileNumber >= W3CLoggerOptions.MaxFileCount)
-                    {
-                        _maxFilesReached = true;
-                        // Return early if log directory is already full
-                        Log.MaxFilesReached(_logger);
-                        return;
-                    }
-                    fullName = GetFullName(today);
+                    _maxFilesReached = true;
+                    // Return early if log directory is already full
+                    Log.MaxFilesReached(_logger);
+                    return;
                 }
             }
+
             _firstFile = false;
             if (_maxFilesReached)
             {
@@ -298,6 +308,23 @@ namespace Microsoft.AspNetCore.HttpLogging
             _cancellationTokenSource.Cancel();
             _messageQueue.CompleteAdding();
             await _outputTask;
+        }
+
+        private int GetFirstFileCount(DateTime date)
+        {
+            lock (_pathLock)
+            {
+                var searchString = FormattableString.Invariant($"{_fileName}{date.Year:0000}{date.Month:00}{date.Day:00}.*.txt");
+                var files = new DirectoryInfo(_path)
+                    .GetFiles(searchString);
+
+                return files.Length == 0
+                    ? 0
+                    : files
+                        .Max(x => int.TryParse(x.Name.Split('.').ElementAtOrDefault(Index.FromEnd(2)), out var parsed)
+                            ? parsed + 1
+                            : 0);
+            }
         }
 
         private string GetFullName(DateTime date)
