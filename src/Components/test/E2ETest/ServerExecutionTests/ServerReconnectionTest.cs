@@ -36,10 +36,11 @@ public class ServerReconnectionTest : ServerTestBase<BasicTestAppServerSiteFixtu
         var javascript = (IJavaScriptExecutor)Browser;
         javascript.ExecuteScript("Blazor._internal.forceCloseConnection()");
 
-        // We should see the 'reconnecting' UI appear
-        Browser.Equal("block", () => Browser.Exists(By.Id("components-reconnect-modal")).GetCssValue("display"));
+        // Circuit should immediately try to reconnect itself
+        AssertLogContains("Connection disconnected.");
+        AssertLogContains("WebSocket connected");
 
-        // Then it should disappear
+        // And we should not see a reconnection dialog
         Browser.Equal("none", () => Browser.Exists(By.Id("components-reconnect-modal")).GetCssValue("display"));
 
         Browser.Exists(By.Id("increment")).Click();
@@ -59,18 +60,20 @@ public class ServerReconnectionTest : ServerTestBase<BasicTestAppServerSiteFixtu
         var javascript = (IJavaScriptExecutor)Browser;
         javascript.ExecuteScript("Blazor._internal.forceCloseConnection()");
 
-        // We should see the 'reconnecting' UI appear
-        Browser.Equal("block", () => Browser.Exists(By.Id("components-reconnect-modal")).GetCssValue("display"));
+        // Circuit should immediately try to reconnect itself
+        AssertLogContains("Connection disconnected.");
+        AssertLogContains("WebSocket connected");
 
-        // Then it should disappear
+        // And we should not see a reconnection dialog
         Browser.Equal("none", () => Browser.Exists(By.Id("components-reconnect-modal")).GetCssValue("display"));
 
         // We should receive a render that occurred while disconnected
+        Thread.Sleep(2000);
         var currentValue = Browser.Exists(selector).Text;
         Assert.NotEqual(initialValue, currentValue);
 
         // Verify it continues to tick
-        Thread.Sleep(5);
+        Thread.Sleep(2000);
         Browser.False(() => Browser.Exists(selector).Text == currentValue);
     }
 
@@ -78,7 +81,15 @@ public class ServerReconnectionTest : ServerTestBase<BasicTestAppServerSiteFixtu
     public void ErrorsStopTheRenderingProcess()
     {
         Browser.Exists(By.Id("cause-error")).Click();
-        Browser.True(() => Browser.Manage().Logs.GetLog(LogType.Browser)
-            .Any(l => l.Level == LogLevel.Info && l.Message.Contains("Connection disconnected.")));
+        AssertLogContains("Connection disconnected.");
+    }
+
+    void AssertLogContains(params string[] messages)
+    {
+        var log = Browser.Manage().Logs.GetLog(LogType.Browser);
+        foreach (var message in messages)
+        {
+            Assert.Contains(log, entry => entry.Message.Contains(message));
+        }
     }
 }
